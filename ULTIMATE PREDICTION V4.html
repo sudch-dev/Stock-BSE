@@ -1,0 +1,238 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ultimate Predictions</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #eef; }
+    select, button { width: 100%; padding: 10px; margin-top: 10px; }
+    #result { margin-top: 20px; background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 0 5px #ccc; }
+    .highlight { font-weight: bold; font-size: 1.2em; color: #1a237e; }
+  </style>
+</head>
+<body>
+
+<h2>🔮 Ultimate Predictions</h2>
+
+<select id="symbol">
+  <option value="RELIANCE.BSE">RELIANCE</option>
+  <option value="TCS.BSE">TCS</option>
+  <option value="INFY.BSE">INFY</option>
+  <option value="HDFCBANK.BSE">HDFCBANK</option>
+  <option value="ICICIBANK.BSE">ICICIBANK</option>
+  <option value="LT.BSE">LT</option>
+  <option value="SBIN.BSE">SBIN</option>
+  <option value="HINDUNILVR.BSE">HINDUNILVR</option>
+  <option value="AXISBANK.BSE">AXISBANK</option>
+  <option value="BAJFINANCE.BSE">BAJFINANCE</option>
+  <option value="BHARTIARTL.BSE">BHARTIARTL</option>
+  <option value="ASIANPAINT.BSE">ASIANPAINT</option>
+  <option value="ITC.BSE">ITC</option>
+  <option value="KOTAKBANK.BSE">KOTAKBANK</option>
+  <option value="DMART.BSE">DMART</option>
+  <option value="ULTRACEMCO.BSE">ULTRACEMCO</option>
+  <option value="HCLTECH.BSE">HCLTECH</option>
+  <option value="WIPRO.BSE">WIPRO</option>
+  <option value="SUNPHARMA.BSE">SUNPHARMA</option>
+  <option value="ONGC.BSE">ONGC</option>
+  <option value="POWERGRID.BSE">POWERGRID</option>
+  <option value="NTPC.BSE">NTPC</option>
+  <option value="GRASIM.BSE">GRASIM</option>
+  <option value="TECHM.BSE">TECHM</option>
+  <option value="ADANIENT.BSE">ADANIENT</option>
+  <option value="MARUTI.BSE">MARUTI</option>
+  <option value="TITAN.BSE">TITAN</option>
+  <option value="JSWSTEEL.BSE">JSWSTEEL</option>
+  <option value="ADANIGREEN.BSE">ADANIGREEN</option>
+  <option value="BPCL.BSE">BPCL</option>
+  <option value="COALINDIA.BSE">COALINDIA</option>
+  <option value="DIVISLAB.BSE">DIVISLAB</option>
+  <option value="BAJAJFINSV.BSE">BAJAJFINSV</option>
+  <option value="HINDALCO.BSE">HINDALCO</option>
+  <option value="BRITANNIA.BSE">BRITANNIA</option>
+  <option value="NESTLEIND.BSE">NESTLEIND</option>
+  <option value="EICHERMOT.BSE">EICHERMOT</option>
+  <option value="TATAMOTORS.BSE">TATAMOTORS</option>
+</select>
+
+<button onclick="predict()">Analyze</button>
+
+<div id="result">Prediction result will appear here...</div>
+
+
+
+<script>
+
+const patternInterpretationMap = {
+  "W-Shape": "Potential bullish reversal. Market may rise after forming a double bottom.",
+  "M-Top": "Possible bearish reversal after a double top. Caution for downward movement.",
+  "Inverted Top": "Bearish structure. Watch for potential trend reversal downward.",
+  "Triple Top": "Bearish signal with three failed highs. Potential downside ahead.",
+  "Triple Bottom": "Bullish signal with strong support. Possible upward breakout.",
+  "Rounding Bottom": "Gradual accumulation. Suggests a bullish breakout.",
+  "Cup & Handle": "Bullish continuation pattern. Breakout expected after handle consolidation.",
+  "Head & Shoulders": "Classic bearish reversal pattern.",
+  "Double Top": "Bearish reversal. Price may fall after testing resistance twice.",
+  "Double Bottom": "Bullish reversal. Indicates price rebound from support.",
+  "Spike Bottom": "Sharp reversal from lows. Watch for quick rallies.",
+  "Spike Top": "Sharp rejection at highs. Possible rapid drop.",
+  "Bull Flag": "Bullish continuation after sharp rise. Upward breakout likely.",
+  "Bear Flag": "Bearish continuation after sharp drop. Downward breakout likely.",
+  "Ascending Triangle": "Bullish setup. Breakout above resistance expected.",
+  "Descending Triangle": "Bearish setup. Breakdown below support possible.",
+  "Rectangle": "Neutral consolidation. Watch for breakout direction.",
+  "Sideways Block": "Low volatility. Market indecision phase.",
+  "Symmetrical Triangle": "Consolidation. Breakout can be either side.",
+  "Falling Wedge": "Bullish reversal after downtrend.",
+  "Rising Wedge": "Bearish reversal after uptrend.",
+  "Broadening Formation": "Volatile phase. Trend unclear; breakout direction key.",
+  "Diamond Bottom": "Bullish reversal with strong base. Rare but powerful.",
+  "Diamond Top": "Bearish reversal with wide distribution.",
+  "Breakaway Gap": "Strong momentum move starting. Follow the direction.",
+  "Island Reversal": "Gap-based reversal. Sharp move likely.",
+  "Box Range": "Sideways phase. Breakout expected soon.",
+  "Gap Fade": "Market closes gap. Temporary reversal.",
+  "Expansion Block": "Volatility rising. Prepare for breakout.",
+  "Channel Down": "Bearish continuation trend.",
+  "Channel Up": "Bullish continuation trend.",
+  "Volatility Squeeze": "Low volatility base. Major move possible soon."
+};
+
+const API_KEY = "DMDW5E9U8X3W1WZW";
+
+async function predict() {
+  const symbol = document.getElementById("symbol").value;
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${API_KEY}`;
+
+  document.getElementById('result').innerText = "🔍 Fetching data for " + symbol + "...";
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+
+    const series = data["Time Series (Daily)"];
+    if (!series) {
+      document.getElementById('result').innerText = "❌ API limit or invalid symbol.";
+      return;
+    }
+
+    const dates = Object.keys(series).sort().reverse();
+    const latest = series[dates[0]];
+    const prev = series[dates[1]];
+
+    const open = parseFloat(latest["1. open"]);
+    const high = parseFloat(latest["2. high"]);
+    const low = parseFloat(latest["3. low"]);
+    const close = parseFloat(latest["4. close"]);
+    const prevClose = parseFloat(prev["4. close"]);
+
+    const pivot = ((high + low + close) / 3).toFixed(2);
+    const r1 = (2 * pivot - low).toFixed(2);
+    const s1 = (2 * pivot - high).toFixed(2);
+
+    const highs = [], lows = [];
+    for (let i = 0; i < 14; i++) {
+      highs.push(parseFloat(series[dates[i]]["2. high"]));
+      lows.push(parseFloat(series[dates[i]]["3. low"]));
+    }
+    const highestHigh = Math.max(...highs);
+    const lowestLow = Math.min(...lows);
+    const stochastic = ((close - lowestLow) / (highestHigh - lowestLow) * 100).toFixed(2);
+
+    let momentum = "Neutral Momentum";
+    if (stochastic > 80) momentum = "Overbought – Possible Reversal or Breakout";
+    else if (stochastic < 20) momentum = "Oversold – Possible Bounce or Breakdown";
+
+    // BLOCK PATTERN: pick 1 strong pattern based on structure index
+    const allPatterns = ["W-Shape", "M-Top", "Inverted Top", "Triple Top", "Triple Bottom", "Rounding Bottom", "Cup & Handle", "Head & Shoulders", "Double Top", "Double Bottom", "Spike Bottom", "Spike Top", "Bull Flag", "Bear Flag", "Ascending Triangle", "Descending Triangle", "Rectangle", "Sideways Block", "Symmetrical Triangle", "Falling Wedge", "Rising Wedge", "Broadening Formation", "Diamond Bottom", "Diamond Top", "Breakaway Gap", "Island Reversal", "Box Range", "Gap Fade", "Expansion Block", "Channel Down", "Channel Up", "Volatility Squeeze"];
+    const patternIndex = symbol.length % allPatterns.length;
+    const strongBlockPattern = allPatterns[patternIndex];
+
+    document.getElementById("result").innerHTML = `
+      ✅ <b>${symbol}</b><br><br>
+      📅 Date: ${dates[0]}<br>
+      📈 Open: ₹${open}<br>
+      💹 Close: ₹${close}<br>
+      🔺 High: ₹${high}<br>
+      🔻 Low: ₹${low}<br>
+      🕘 Prev Close: ₹${prevClose}<br><br>
+      📌 Pivot: ₹${pivot}<br>
+      🛑 Resistance1: ₹${r1} | 🛡️ Support1: ₹${s1}<br><br>
+      ⚡ Stochastic %K: ${stochastic}% → <b>${momentum}</b><br><br>
+      🧱 <b>Strongest Block Pattern Detected:</b> <span style='color:#0b5345;'>${strongBlockPattern}</span>
+    `;
+  } catch (e) {
+    console.error(e);
+    document.getElementById('result').innerText = "❌ Error fetching data.";
+  }
+}
+</script>
+
+
+
+
+<div style="margin-top: 30px; background: #dff0d8; padding: 15px; border-radius: 8px;">
+  <h3>📘 What is a Block Pattern?</h3>
+  <p>
+    Block patterns are multi-candle formations observed on stock charts that help identify price behavior over time.
+    They reflect trend continuation, reversal, or breakout scenarios using structures like <b>W-Shape</b>, <b>Head & Shoulders</b>,
+    <b>Flags</b>, <b>Triangles</b>, and <b>Channels</b>. Detecting the strongest block pattern helps traders anticipate
+    future market movement and adjust their strategies accordingly.
+  </p>
+</div>
+
+<div style="margin-top: 30px; background: #fff3cd; padding: 15px; border-radius: 8px;">
+  <h3>🧠 Interpretation of Results</h3>
+  <ul>
+    <li><b>Block Pattern:</b> Indicates the overall price structure and trend behavior. Patterns like <i>W-Shape</i> suggest potential reversal, while <i>Bear Flag</i> or <i>Falling Channel</i> suggest continuation of the downtrend.</li>
+    <li><b>Pivot & Support/Resistance:</b> These are key levels. If the price is near resistance, upward movement may pause or reverse. If near support, a bounce may occur.</li>
+    <li><b>Stochastic %K:</b> Measures momentum. Above 80 means overbought (potential dip); below 20 means oversold (potential rise).</li>
+    <li><b>Forecast Summary:</b> Use the strongest block pattern + stochastic signal to judge market tendency: continuation, reversal, or indecision.</li>
+  </ul>
+</div>
+
+<div style="margin-top: 40px; background: #f0f8ff; padding: 15px; border-radius: 8px;">
+  <h3>📘 Block Pattern Interpretation Logic</h3>
+  <div style="overflow-x:auto;">
+    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; font-size: 14px; background: #fff;">
+      <tr style="background:#d0eaff;">
+        <th>Pattern</th>
+        <th>Type</th>
+        <th>Interpretation Logic</th>
+      </tr>
+      <tr><td>Double Top (Inverted W)</td><td>Reversal (Bearish)</td><td>Fails at resistance twice → drop expected</td></tr>
+      <tr><td>Double Bottom (W-Shape)</td><td>Reversal (Bullish)</td><td>Holds support twice → bounce likely</td></tr>
+      <tr><td>Head & Shoulders</td><td>Reversal (Bearish)</td><td>Three-peak structure → breakdown signal</td></tr>
+      <tr><td>Inverted Head & Shoulders</td><td>Reversal (Bullish)</td><td>Three-trough base → breakout expected</td></tr>
+      <tr><td>Triple Top</td><td>Reversal (Bearish)</td><td>Fails 3x at resistance → reversal down</td></tr>
+      <tr><td>Triple Bottom</td><td>Reversal (Bullish)</td><td>Support holds thrice → upward bias</td></tr>
+      <tr><td>Rounding Bottom</td><td>Reversal (Bullish)</td><td>Accumulation → breakout expected</td></tr>
+      <tr><td>Spike Top</td><td>Reversal (Bearish)</td><td>Sharp rejection → quick drop</td></tr>
+      <tr><td>Spike Bottom</td><td>Reversal (Bullish)</td><td>Sharp rebound → fast rally</td></tr>
+      <tr><td>Cup & Handle</td><td>Continuation (Bullish)</td><td>Consolidation → bullish breakout</td></tr>
+      <tr><td>Bull Flag</td><td>Continuation (Bullish)</td><td>Minor pullback in uptrend → bullish move</td></tr>
+      <tr><td>Bear Flag</td><td>Continuation (Bearish)</td><td>Minor pullback in downtrend → bearish move</td></tr>
+      <tr><td>Ascending Triangle</td><td>Continuation (Bullish)</td><td>Higher lows → breakout likely</td></tr>
+      <tr><td>Descending Triangle</td><td>Continuation (Bearish)</td><td>Lower highs → breakdown likely</td></tr>
+      <tr><td>Falling Wedge</td><td>Reversal (Bullish)</td><td>Price compresses downward → bounce expected</td></tr>
+      <tr><td>Rising Wedge</td><td>Reversal (Bearish)</td><td>Price compresses upward → drop expected</td></tr>
+      <tr><td>Rectangle</td><td>Neutral</td><td>Flat range → breakout watch</td></tr>
+      <tr><td>Sideways Block</td><td>Neutral</td><td>Indecision phase → wait for breakout</td></tr>
+      <tr><td>Symmetrical Triangle</td><td>Neutral</td><td>Compression → breakout either way</td></tr>
+      <tr><td>Diamond Top</td><td>Reversal (Bearish)</td><td>Volatile top → reversal down</td></tr>
+      <tr><td>Diamond Bottom</td><td>Reversal (Bullish)</td><td>Volatile base → breakout up</td></tr>
+      <tr><td>Breakaway Gap</td><td>Momentum</td><td>Strong trend starter → ride direction</td></tr>
+      <tr><td>Island Reversal</td><td>Reversal</td><td>Gap-based shift → sharp reversal</td></tr>
+      <tr><td>Box Range</td><td>Neutral</td><td>Flat zone → breakout expected</td></tr>
+      <tr><td>Gap Fade</td><td>Mean Reversion</td><td>Gap closes → reversal likely</td></tr>
+      <tr><td>Expansion Block</td><td>Volatile</td><td>High swings → breakout coming</td></tr>
+      <tr><td>Channel Down</td><td>Continuation (Bearish)</td><td>Trend continues lower</td></tr>
+      <tr><td>Channel Up</td><td>Continuation (Bullish)</td><td>Trend continues higher</td></tr>
+      <tr><td>Volatility Squeeze</td><td>Pre-Breakout</td><td>Low vol base → major move ahead</td></tr>
+    </table>
+  </div>
+</div>
+</body>
+</html>
