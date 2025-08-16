@@ -3,7 +3,7 @@ import os
 import requests
 from flask import Flask, jsonify, request, render_template_string
 
-API_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY") or os.environ.get("API_KEY")
+API_KEY = os.environ.get("API_KEY")
 BASE_URL = "https://www.alphavantage.co/query"
 
 app = Flask(__name__)
