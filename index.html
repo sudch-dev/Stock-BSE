@@ -66,200 +66,33 @@
   <option value="TATAMOTORS.BSE">TATAMOTORS</option>
 </select>
 
-<button onclick="predict()">Analyze</button>
+<button id="go">Analyze</button>
 
 <canvas id="chart"></canvas>
 
 <div id="result">Prediction result will appear here...</div>
 
 <script>
-/* ---------- config ---------- */
-const API_KEY = "DMDW5E9U8X3W1WZW";
+const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 
-/* ---------- pattern interpretations ---------- */
-const patternInterpretationMap = {
-  "W-Shape": "Potential bullish reversal. Market may rise after forming a double bottom.",
-  "M-Top": "Possible bearish reversal after a double top. Caution for downward movement.",
-  "Inverted Top": "Bearish structure. Watch for potential trend reversal downward.",
-  "Triple Top": "Bearish signal with three failed highs. Potential downside ahead.",
-  "Triple Bottom": "Bullish signal with strong support. Possible upward breakout.",
-  "Rounding Bottom": "Gradual accumulation. Suggests a bullish breakout.",
-  "Cup & Handle": "Bullish continuation pattern. Breakout expected after handle consolidation.",
-  "Head & Shoulders": "Classic bearish reversal pattern.",
-  "Double Top": "Bearish reversal. Price may fall after testing resistance twice.",
-  "Double Bottom": "Bullish reversal. Indicates price rebound from support.",
-  "Spike Bottom": "Sharp reversal from lows. Watch for quick rallies.",
-  "Spike Top": "Sharp rejection at highs. Possible rapid drop.",
-  "Bull Flag": "Bullish continuation after sharp rise. Upward breakout likely.",
-  "Bear Flag": "Bearish continuation after sharp drop. Downward breakout likely.",
-  "Ascending Triangle": "Bullish setup. Breakout above resistance expected.",
-  "Descending Triangle": "Bearish setup. Breakdown below support possible.",
-  "Rectangle": "Neutral consolidation. Watch for breakout direction.",
-  "Sideways Block": "Low volatility. Market indecision phase.",
-  "Symmetrical Triangle": "Consolidation. Breakout can be either side.",
-  "Falling Wedge": "Bullish reversal after downtrend.",
-  "Rising Wedge": "Bearish reversal after uptrend.",
-  "Broadening Formation": "Volatile phase. Trend unclear; breakout direction key.",
-  "Diamond Bottom": "Bullish reversal with strong base. Rare but powerful.",
-  "Diamond Top": "Bearish reversal with wide distribution.",
-  "Breakaway Gap": "Strong momentum move starting. Follow the direction.",
-  "Island Reversal": "Gap-based reversal. Sharp move likely.",
-  "Box Range": "Sideways phase. Breakout expected soon.",
-  "Gap Fade": "Market closes gap. Temporary reversal.",
-  "Expansion Block": "Volatility rising. Prepare for breakout.",
-  "Channel Down": "Bearish continuation trend.",
-  "Channel Up": "Bullish continuation trend.",
-  "Volatility Squeeze": "Low volatility base. Major move possible soon."
-};
-
-/* ---------- tiny helpers ---------- */
-const fmt = n => Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
-const pct = (a,b) => b === 0 ? 0 : ((a - b) / b) * 100;
-const mean = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
-function linreg(y) {
-  const n = y.length; if (n < 2) return {slope:0, intercept:y[0]||0, r2:0};
-  const x = Array.from({length:n}, (_,i)=>i);
-  const xBar = mean(x), yBar = mean(y);
-  let num=0, den=0, ssTot=0, ssRes=0;
-  for (let i=0;i<n;i++){ num += (x[i]-xBar)*(y[i]-yBar); den += (x[i]-xBar)**2; }
-  const slope = den === 0 ? 0 : num/den;
-  const intercept = yBar - slope*xBar;
-  for (let i=0;i<n;i++){ const yHat = intercept + slope*x[i]; ssTot += (y[i]-yBar)**2; ssRes += (y[i]-yHat)**2; }
-  const r2 = ssTot === 0 ? 0 : 1 - ssRes/ssTot;
-  return {slope, intercept, r2};
-}
-function rollingHigh(arr, n){ return Math.max(...arr.slice(0,n)); }
-function rollingLow(arr, n){ return Math.min(...arr.slice(0,n)); }
-
-/* swing points: simple local extrema finder (arrays are newest->oldest) */
-function findSwings(highs, lows, lookback=2, maxPoints=10) {
-  const swings = [];
-  for (let i = lookback; i < highs.length - lookback; i++) {
-    const isHigh = highs.slice(i-lookback, i+lookback+1).every((v,idx)=> idx===lookback ? true : highs[i] >= v);
-    const isLow  = lows.slice(i-lookback, i+lookback+1).every((v,idx)=> idx===lookback ? true : lows[i] <= v);
-    if (isHigh) swings.push({type:'H', idx:i, price:highs[i]});
-    if (isLow)  swings.push({type:'L', idx:i, price:lows[i]});
-  }
-  swings.sort((a,b)=>a.idx-b.idx);              /* chronological */
-  return swings.slice(-maxPoints).reverse();     /* most recent first */
-}
-
-/* ---------- pattern detectors (heuristic) ---------- */
-function detectDoubleTop(swings, tolPct=1.5) {
-  const hs = swings.filter(s=>s.type==='H');
-  if (hs.length < 2) return null;
-  const [h1, h2] = hs.slice(0,2);
-  const near = Math.abs(pct(h1.price, h2.price)) <= tolPct;
-  const valley = swings.find(s=>s.type==='L' && s.idx < h1.idx && s.idx > h2.idx);
-  return (near && valley) ? {name:"Double Top", confidence:0.7} : null;
-}
-function detectDoubleBottom(swings, tolPct=1.5) {
-  const ls = swings.filter(s=>s.type==='L');
-  if (ls.length < 2) return null;
-  const [l1, l2] = ls.slice(0,2);
-  const near = Math.abs(pct(l1.price, l2.price)) <= tolPct;
-  const peak = swings.find(s=>s.type==='H' && s.idx < l1.idx && s.idx > l2.idx);
-  return (near && peak) ? {name:"Double Bottom", confidence:0.7} : null;
-}
-function detectHeadShoulders(swings, tolPct=4) {
-  const hs = swings.filter(s=>s.type==='H');
-  const ls = swings.filter(s=>s.type==='L');
-  if (hs.length < 3 || ls.length < 2) return null;
-  const [H1,H2,H3] = hs.slice(0,3);
-  const middleHigher = H2.price > H1.price && H2.price > H3.price;
-  const shouldersNear = Math.abs(pct(H1.price,H3.price)) <= tolPct;
-  const neckNear = Math.abs(pct(ls[0].price, ls[1].price)) <= tolPct;
-  return (middleHigher && shouldersNear && neckNear) ? {name:"Head & Shoulders", confidence:0.65} : null;
-}
-function detectTriangles(swings, tolPct=2) {
-  const hs = swings.filter(s=>s.type==='H');
-  const ls = swings.filter(s=>s.type==='L');
-  if (hs.length < 2 || ls.length < 2) return null;
-  const flatHighs = Math.abs(pct(hs[0].price, hs[1].price)) <= tolPct;
-  const flatLows  = Math.abs(pct(ls[0].price, ls[1].price)) <= tolPct;
-  const risingLows = ls[0].price > ls[1].price;
-  const fallingHighs = hs[0].price < hs[1].price;
-  if (flatHighs && risingLows) return {name:"Ascending Triangle", confidence:0.6};
-  if (flatLows && fallingHighs) return {name:"Descending Triangle", confidence:0.6};
-  return null;
-}
-function detectWedges(swings) {
-  const hs = swings.filter(s=>s.type==='H');
-  const ls = swings.filter(s=>s.type==='L');
-  if (hs.length < 3 || ls.length < 3) return null;
-  const highsFalling = hs[0].price < hs[1].price && hs[1].price < hs[2].price;
-  const lowsRising   = ls[0].price > ls[1].price && ls[1].price > ls[2].price;
-  if (highsFalling && lowsRising) return {name:"Falling Wedge", confidence:0.55};
-  const highsRising = hs[0].price > hs[1].price && hs[1].price > hs[2].price;
-  const lowsFalling = ls[0].price < ls[1].price && ls[1].price < ls[2].price;
-  if (highsRising && lowsFalling) return {name:"Rising Wedge", confidence:0.55};
-  return null;
-}
-function detectFlags(closes, lookbackImpulse=8, pullbackWin=5) {
-  if (closes.length < lookbackImpulse + pullbackWin + 2) return null;
-  const impulseChange = pct(closes[lookbackImpulse], closes[lookbackImpulse+1]);
-  const lastChange = pct(closes[0], closes[pullbackWin]);
-  const rangeRecent = Math.max(...closes.slice(0,pullbackWin)) - Math.min(...closes.slice(0,pullbackWin));
-  const impulseRange = Math.abs(closes[lookbackImpulse+1] - closes[lookbackImpulse]);
-  const tight = rangeRecent < impulseRange * 0.6;
-  if (impulseChange > 6 && lastChange > -2 && tight) return {name:"Bull Flag", confidence:0.55};
-  if (impulseChange < -6 && lastChange <  2 && tight) return {name:"Bear Flag", confidence:0.55};
-  return null;
-}
-function detectChannels(closes, win=20) {
-  const arr = closes.slice(0, Math.min(win, closes.length)).reverse(); // oldest->newest
-  const {slope, r2} = linreg(arr);
-  if (r2 < 0.6) return null;
-  if (slope > 0) return {name:"Channel Up", confidence:0.5};
-  if (slope < 0) return {name:"Channel Down", confidence:0.5};
-  return null;
-}
-function detectRectangle(highs, lows, win=12) {
-  const h = highs.slice(0,win), l = lows.slice(0,win);
-  const top = Math.max(...h), bot = Math.min(...l);
-  const widthPct = Math.abs(pct(top, bot));
-  return widthPct <= 10 ? {name:"Rectangle", confidence:0.45} : null;
-}
-
-/* Orchestrator: pick the first match by priority */
-function detectBlockPattern(highs, lows, closes) {
-  const swings = findSwings(highs, lows, 2, 10);
-  const detectors = [
-    detectHeadShoulders,
-    detectDoubleTop,
-    detectDoubleBottom,
-    (sw)=>detectTriangles(sw),
-    (sw)=>detectWedges(sw),
-    ()=>detectFlags(closes),
-    ()=>detectChannels(closes),
-    ()=>detectRectangle(highs, lows)
-  ];
-  for (const fn of detectors) {
-    const res = fn.length >= 2 ? fn(swings) : fn();
-    if (res) return res;
-  }
-  return {name:"Sideways Block", confidence:0.4};
-}
-
-/* tiny sparkline (close prices) */
 function drawSparkline(closes) {
   const canvas = document.getElementById("chart");
   const ctx = canvas.getContext("2d");
-  const W = canvas.width = canvas.clientWidth;
-  const H = canvas.height = 140;
+  const W = (canvas.width = canvas.clientWidth);
+  const H = (canvas.height = 140);
 
   if (!closes || closes.length < 2) { canvas.style.display = "none"; return; }
   canvas.style.display = "block";
 
-  const data = closes.slice(0, 60).reverse(); // last 60 days, oldest->newest
+  const data = closes.slice(0, 60).reverse(); // last 60, oldest->newest
   const min = Math.min(...data), max = Math.max(...data);
   const pad = 8;
   const xStep = (W - pad*2) / (data.length - 1);
-  const y = v => H - pad - ( (v - min) / (max - min || 1) ) * (H - pad*2);
+  const y = (v) => H - pad - ((v - min) / (max - min || 1)) * (H - pad*2);
 
   ctx.clearRect(0,0,W,H);
 
-  // gridline at latest close
+  // gridline at last
   ctx.beginPath();
   ctx.moveTo(pad, y(data[data.length-1]));
   ctx.lineTo(W-pad, y(data[data.length-1]));
@@ -270,9 +103,7 @@ function drawSparkline(closes) {
   ctx.setLineDash([]);
   ctx.beginPath();
   ctx.moveTo(pad, y(data[0]));
-  for (let i=1;i<data.length;i++) {
-    ctx.lineTo(pad + i*xStep, y(data[i]));
-  }
+  for (let i=1;i<data.length;i++) ctx.lineTo(pad + i*xStep, y(data[i]));
   ctx.lineWidth = 2;
   ctx.stroke();
 
@@ -282,77 +113,36 @@ function drawSparkline(closes) {
   ctx.fill();
 }
 
-/* ---------- main analysis ---------- */
 async function predict() {
   const symbol = document.getElementById("symbol").value;
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${API_KEY}`;
-
   const $res = document.getElementById("result");
   $res.innerText = "🔍 Fetching data for " + symbol + "...";
 
   try {
-    const r = await fetch(url);
+    const r = await fetch(`/api/analyze?symbol=${encodeURIComponent(symbol)}`);
     const data = await r.json();
-
-    if (data["Note"]) {
-      $res.innerHTML = "⚠️ API limit reached. Please try again in ~1 minute.";
-      document.getElementById("chart").style.display = "none";
-      return;
-    }
-    const series = data["Time Series (Daily)"];
-    if (!series) {
-      $res.innerText = "❌ API limit or invalid symbol.";
+    if (!data.ok) {
+      $res.innerHTML = "❌ " + (data.error || "Unknown error");
       document.getElementById("chart").style.display = "none";
       return;
     }
 
-    const dates = Object.keys(series).sort().reverse(); // newest -> oldest
-    const latest = series[dates[0]];
-    const prev = series[dates[1]];
-    const open  = parseFloat(latest["1. open"]);
-    const high  = parseFloat(latest["2. high"]);
-    const low   = parseFloat(latest["3. low"]);
-    const close = parseFloat(latest["4. close"]);
-    const prevClose = parseFloat(prev["4. close"]);
-
-    // arrays (newest -> oldest)
-    const highs = dates.map(d => parseFloat(series[d]["2. high"]));
-    const lows  = dates.map(d => parseFloat(series[d]["3. low"]));
-    const closes= dates.map(d => parseFloat(series[d]["4. close"]));
-
-    // pivots
-    const pivot = ((high + low + close) / 3).toFixed(2);
-    const r1 = (2 * pivot - low).toFixed(2);
-    const s1 = (2 * pivot - high).toFixed(2);
-
-    // stochastic %K (14)
-    const hh = rollingHigh(highs, 14);
-    const ll = rollingLow(lows, 14);
-    const stochastic = (((close - ll) / (hh - ll)) * 100).toFixed(2);
-    let momentum = "Neutral Momentum";
-    if (stochastic > 80) momentum = "Overbought – Possible Reversal or Breakout";
-    else if (stochastic < 20) momentum = "Oversold – Possible Bounce or Breakdown";
-
-    // detect pattern (real rules)
-    const pattern = detectBlockPattern(highs, lows, closes);
-    const interpretation = patternInterpretationMap[pattern.name] || "No interpretation available.";
-
-    // draw sparkline
-    drawSparkline(closes);
+    drawSparkline(data.closes);
+    const p = data.pattern;
 
     $res.innerHTML = `
-      ✅ <b>${symbol}</b><br><br>
-      📅 Date: ${dates[0]}<br>
-      📈 Open: ₹${fmt(open)}<br>
-      💹 Close: ₹${fmt(close)}<br>
-      🔺 High: ₹${fmt(high)}<br>
-      🔻 Low: ₹${fmt(low)}<br>
-      🕘 Prev Close: ₹${fmt(prevClose)}<br><br>
-      📌 Pivot: ₹${pivot}<br>
-      🛑 Resistance1: ₹${r1} | 🛡️ Support1: ₹${s1}<br><br>
-      ⚡ Stochastic %K: ${stochastic}% → <b>${momentum}</b><br><br>
-      🧱 <b>Strongest Block Pattern Detected:</b> <span style='color:#0b5345;'>${pattern.name}</span>
-      <div style="margin-top:6px;opacity:.9"><i>${interpretation}</i> · Confidence: ${(pattern.confidence*100).toFixed(0)}%</div>
+      ✅ <b>${data.symbol}</b><br><br>
+      📅 Date: ${data.date}<br>
+      📈 Open: ₹${INR.format(data.open)}<br>
+      💹 Close: ₹${INR.format(data.close)}<br>
+      🔺 High: ₹${INR.format(data.high)}<br>
+      🔻 Low: ₹${INR.format(data.low)}<br>
+      🕘 Prev Close: ₹${INR.format(data.prev_close || 0)}<br><br>
+      📌 Pivot: ₹${INR.format(data.pivot)}<br>
+      🛑 Resistance1: ₹${INR.format(data.r1)} | 🛡️ Support1: ₹${INR.format(data.s1)}<br><br>
+      ⚡ Stochastic %K: ${INR.format(data.stochastic_k)}% → <b>${data.momentum}</b><br><br>
+      🧱 <b>Strongest Block Pattern Detected:</b> <span style='color:#0b5345;'>${p.name}</span>
+      <div style="margin-top:6px;opacity:.9">Confidence: ${(p.confidence*100).toFixed(0)}%</div>
     `;
   } catch (e) {
     console.error(e);
@@ -360,6 +150,8 @@ async function predict() {
     $res.innerText = "❌ Error fetching data.";
   }
 }
+
+document.getElementById("go").addEventListener("click", predict);
 </script>
 
 <div style="margin-top: 30px; background: #dff0d8; padding: 15px; border-radius: 8px;">
@@ -380,48 +172,6 @@ async function predict() {
     <li><b>Stochastic %K:</b> Measures momentum. Above 80 means overbought (potential dip); below 20 means oversold (potential rise).</li>
     <li><b>Forecast Summary:</b> Use the strongest block pattern + stochastic signal to judge market tendency: continuation, reversal, or indecision.</li>
   </ul>
-</div>
-
-<div style="margin-top: 40px; background: #f0f8ff; padding: 15px; border-radius: 8px;">
-  <h3>📘 Block Pattern Interpretation Logic</h3>
-  <div style="overflow-x:auto;">
-    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; font-size: 14px; background: #fff;">
-      <tr style="background:#d0eaff;">
-        <th>Pattern</th>
-        <th>Type</th>
-        <th>Interpretation Logic</th>
-      </tr>
-      <tr><td>Double Top (Inverted W)</td><td>Reversal (Bearish)</td><td>Fails at resistance twice → drop expected</td></tr>
-      <tr><td>Double Bottom (W-Shape)</td><td>Reversal (Bullish)</td><td>Holds support twice → bounce likely</td></tr>
-      <tr><td>Head & Shoulders</td><td>Reversal (Bearish)</td><td>Three-peak structure → breakdown signal</td></tr>
-      <tr><td>Inverted Head & Shoulders</td><td>Reversal (Bullish)</td><td>Three-trough base → breakout expected</td></tr>
-      <tr><td>Triple Top</td><td>Reversal (Bearish)</td><td>Fails 3x at resistance → reversal down</td></tr>
-      <tr><td>Triple Bottom</td><td>Reversal (Bullish)</td><td>Support holds thrice → upward bias</td></tr>
-      <tr><td>Rounding Bottom</td><td>Reversal (Bullish)</td><td>Accumulation → breakout expected</td></tr>
-      <tr><td>Spike Top</td><td>Reversal (Bearish)</td><td>Sharp rejection → quick drop</td></tr>
-      <tr><td>Spike Bottom</td><td>Reversal (Bullish)</td><td>Sharp rebound → fast rally</td></tr>
-      <tr><td>Cup & Handle</td><td>Continuation (Bullish)</td><td>Consolidation → bullish breakout</td></tr>
-      <tr><td>Bull Flag</td><td>Continuation (Bullish)</td><td>Minor pullback in uptrend → bullish move</td></tr>
-      <tr><td>Bear Flag</td><td>Continuation (Bearish)</td><td>Minor pullback in downtrend → bearish move</td></tr>
-      <tr><td>Ascending Triangle</td><td>Continuation (Bullish)</td><td>Higher lows → breakout likely</td></tr>
-      <tr><td>Descending Triangle</td><td>Continuation (Bearish)</td><td>Lower highs → breakdown likely</td></tr>
-      <tr><td>Falling Wedge</td><td>Reversal (Bullish)</td><td>Price compresses downward → bounce expected</td></tr>
-      <tr><td>Rising Wedge</td><td>Reversal (Bearish)</td><td>Price compresses upward → drop expected</td></tr>
-      <tr><td>Rectangle</td><td>Neutral</td><td>Flat range → breakout watch</td></tr>
-      <tr><td>Sideways Block</td><td>Neutral</td><td>Indecision phase → wait for breakout</td></tr>
-      <tr><td>Symmetrical Triangle</td><td>Neutral</td><td>Compression → breakout either way</td></tr>
-      <tr><td>Diamond Top</td><td>Reversal (Bearish)</td><td>Volatile top → reversal down</td></tr>
-      <tr><td>Diamond Bottom</td><td>Reversal (Bullish)</td><td>Volatile base → breakout up</td></tr>
-      <tr><td>Breakaway Gap</td><td>Momentum</td><td>Strong trend starter → ride direction</td></tr>
-      <tr><td>Island Reversal</td><td>Reversal</td><td>Gap-based shift → sharp reversal</td></tr>
-      <tr><td>Box Range</td><td>Neutral</td><td>Flat zone → breakout expected</td></tr>
-      <tr><td>Gap Fade</td><td>Mean Reversion</td><td>Gap closes → reversal likely</td></tr>
-      <tr><td>Expansion Block</td><td>Volatile</td><td>High swings → breakout coming</td></tr>
-      <tr><td>Channel Down</td><td>Continuation (Bearish)</td><td>Trend continues lower</td></tr>
-      <tr><td>Channel Up</td><td>Continuation (Bullish)</td><td>Trend continues higher</td></tr>
-      <tr><td>Volatility Squeeze</td><td>Pre-Breakout</td><td>Low vol base → major move ahead</td></tr>
-    </table>
-  </div>
 </div>
 
 </body>
