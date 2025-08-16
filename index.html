@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,10 +5,20 @@
   <title>Ultimate Predictions</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
-    body { font-family: sans-serif; padding: 20px; background: #eef; }
-    select, button { width: 100%; padding: 10px; margin-top: 10px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 20px; background: #eef; }
+    h2 { margin-top: 0; }
+    select, button { width: 100%; padding: 10px; margin-top: 10px; border-radius: 6px; border: 1px solid #bcd; }
+    button { background: #1a237e; color: #fff; cursor: pointer; }
+    button:hover { filter: brightness(1.05); }
     #result { margin-top: 20px; background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 0 5px #ccc; }
     .highlight { font-weight: bold; font-size: 1.2em; color: #1a237e; }
+    #chart { width: 100%; height: 140px; margin-top: 10px; display: none; }
+    @media (max-width: 480px) {
+      #result { font-size: 15px; line-height: 1.6; }
+      select, button { font-size: 16px; }
+    }
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; }
   </style>
 </head>
 <body>
@@ -59,12 +68,15 @@
 
 <button onclick="predict()">Analyze</button>
 
+<canvas id="chart"></canvas>
+
 <div id="result">Prediction result will appear here...</div>
 
-
-
 <script>
+/* ---------- config ---------- */
+const API_KEY = "DMDW5E9U8X3W1WZW";
 
+/* ---------- pattern interpretations ---------- */
 const patternInterpretationMap = {
   "W-Shape": "Potential bullish reversal. Market may rise after forming a double bottom.",
   "M-Top": "Possible bearish reversal after a double top. Caution for downward movement.",
@@ -100,78 +112,255 @@ const patternInterpretationMap = {
   "Volatility Squeeze": "Low volatility base. Major move possible soon."
 };
 
-const API_KEY = "DMDW5E9U8X3W1WZW";
+/* ---------- tiny helpers ---------- */
+const fmt = n => Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const pct = (a,b) => b === 0 ? 0 : ((a - b) / b) * 100;
+const mean = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
+function linreg(y) {
+  const n = y.length; if (n < 2) return {slope:0, intercept:y[0]||0, r2:0};
+  const x = Array.from({length:n}, (_,i)=>i);
+  const xBar = mean(x), yBar = mean(y);
+  let num=0, den=0, ssTot=0, ssRes=0;
+  for (let i=0;i<n;i++){ num += (x[i]-xBar)*(y[i]-yBar); den += (x[i]-xBar)**2; }
+  const slope = den === 0 ? 0 : num/den;
+  const intercept = yBar - slope*xBar;
+  for (let i=0;i<n;i++){ const yHat = intercept + slope*x[i]; ssTot += (y[i]-yBar)**2; ssRes += (y[i]-yHat)**2; }
+  const r2 = ssTot === 0 ? 0 : 1 - ssRes/ssTot;
+  return {slope, intercept, r2};
+}
+function rollingHigh(arr, n){ return Math.max(...arr.slice(0,n)); }
+function rollingLow(arr, n){ return Math.min(...arr.slice(0,n)); }
 
+/* swing points: simple local extrema finder (arrays are newest->oldest) */
+function findSwings(highs, lows, lookback=2, maxPoints=10) {
+  const swings = [];
+  for (let i = lookback; i < highs.length - lookback; i++) {
+    const isHigh = highs.slice(i-lookback, i+lookback+1).every((v,idx)=> idx===lookback ? true : highs[i] >= v);
+    const isLow  = lows.slice(i-lookback, i+lookback+1).every((v,idx)=> idx===lookback ? true : lows[i] <= v);
+    if (isHigh) swings.push({type:'H', idx:i, price:highs[i]});
+    if (isLow)  swings.push({type:'L', idx:i, price:lows[i]});
+  }
+  swings.sort((a,b)=>a.idx-b.idx);              /* chronological */
+  return swings.slice(-maxPoints).reverse();     /* most recent first */
+}
+
+/* ---------- pattern detectors (heuristic) ---------- */
+function detectDoubleTop(swings, tolPct=1.5) {
+  const hs = swings.filter(s=>s.type==='H');
+  if (hs.length < 2) return null;
+  const [h1, h2] = hs.slice(0,2);
+  const near = Math.abs(pct(h1.price, h2.price)) <= tolPct;
+  const valley = swings.find(s=>s.type==='L' && s.idx < h1.idx && s.idx > h2.idx);
+  return (near && valley) ? {name:"Double Top", confidence:0.7} : null;
+}
+function detectDoubleBottom(swings, tolPct=1.5) {
+  const ls = swings.filter(s=>s.type==='L');
+  if (ls.length < 2) return null;
+  const [l1, l2] = ls.slice(0,2);
+  const near = Math.abs(pct(l1.price, l2.price)) <= tolPct;
+  const peak = swings.find(s=>s.type==='H' && s.idx < l1.idx && s.idx > l2.idx);
+  return (near && peak) ? {name:"Double Bottom", confidence:0.7} : null;
+}
+function detectHeadShoulders(swings, tolPct=4) {
+  const hs = swings.filter(s=>s.type==='H');
+  const ls = swings.filter(s=>s.type==='L');
+  if (hs.length < 3 || ls.length < 2) return null;
+  const [H1,H2,H3] = hs.slice(0,3);
+  const middleHigher = H2.price > H1.price && H2.price > H3.price;
+  const shouldersNear = Math.abs(pct(H1.price,H3.price)) <= tolPct;
+  const neckNear = Math.abs(pct(ls[0].price, ls[1].price)) <= tolPct;
+  return (middleHigher && shouldersNear && neckNear) ? {name:"Head & Shoulders", confidence:0.65} : null;
+}
+function detectTriangles(swings, tolPct=2) {
+  const hs = swings.filter(s=>s.type==='H');
+  const ls = swings.filter(s=>s.type==='L');
+  if (hs.length < 2 || ls.length < 2) return null;
+  const flatHighs = Math.abs(pct(hs[0].price, hs[1].price)) <= tolPct;
+  const flatLows  = Math.abs(pct(ls[0].price, ls[1].price)) <= tolPct;
+  const risingLows = ls[0].price > ls[1].price;
+  const fallingHighs = hs[0].price < hs[1].price;
+  if (flatHighs && risingLows) return {name:"Ascending Triangle", confidence:0.6};
+  if (flatLows && fallingHighs) return {name:"Descending Triangle", confidence:0.6};
+  return null;
+}
+function detectWedges(swings) {
+  const hs = swings.filter(s=>s.type==='H');
+  const ls = swings.filter(s=>s.type==='L');
+  if (hs.length < 3 || ls.length < 3) return null;
+  const highsFalling = hs[0].price < hs[1].price && hs[1].price < hs[2].price;
+  const lowsRising   = ls[0].price > ls[1].price && ls[1].price > ls[2].price;
+  if (highsFalling && lowsRising) return {name:"Falling Wedge", confidence:0.55};
+  const highsRising = hs[0].price > hs[1].price && hs[1].price > hs[2].price;
+  const lowsFalling = ls[0].price < ls[1].price && ls[1].price < ls[2].price;
+  if (highsRising && lowsFalling) return {name:"Rising Wedge", confidence:0.55};
+  return null;
+}
+function detectFlags(closes, lookbackImpulse=8, pullbackWin=5) {
+  if (closes.length < lookbackImpulse + pullbackWin + 2) return null;
+  const impulseChange = pct(closes[lookbackImpulse], closes[lookbackImpulse+1]);
+  const lastChange = pct(closes[0], closes[pullbackWin]);
+  const rangeRecent = Math.max(...closes.slice(0,pullbackWin)) - Math.min(...closes.slice(0,pullbackWin));
+  const impulseRange = Math.abs(closes[lookbackImpulse+1] - closes[lookbackImpulse]);
+  const tight = rangeRecent < impulseRange * 0.6;
+  if (impulseChange > 6 && lastChange > -2 && tight) return {name:"Bull Flag", confidence:0.55};
+  if (impulseChange < -6 && lastChange <  2 && tight) return {name:"Bear Flag", confidence:0.55};
+  return null;
+}
+function detectChannels(closes, win=20) {
+  const arr = closes.slice(0, Math.min(win, closes.length)).reverse(); // oldest->newest
+  const {slope, r2} = linreg(arr);
+  if (r2 < 0.6) return null;
+  if (slope > 0) return {name:"Channel Up", confidence:0.5};
+  if (slope < 0) return {name:"Channel Down", confidence:0.5};
+  return null;
+}
+function detectRectangle(highs, lows, win=12) {
+  const h = highs.slice(0,win), l = lows.slice(0,win);
+  const top = Math.max(...h), bot = Math.min(...l);
+  const widthPct = Math.abs(pct(top, bot));
+  return widthPct <= 10 ? {name:"Rectangle", confidence:0.45} : null;
+}
+
+/* Orchestrator: pick the first match by priority */
+function detectBlockPattern(highs, lows, closes) {
+  const swings = findSwings(highs, lows, 2, 10);
+  const detectors = [
+    detectHeadShoulders,
+    detectDoubleTop,
+    detectDoubleBottom,
+    (sw)=>detectTriangles(sw),
+    (sw)=>detectWedges(sw),
+    ()=>detectFlags(closes),
+    ()=>detectChannels(closes),
+    ()=>detectRectangle(highs, lows)
+  ];
+  for (const fn of detectors) {
+    const res = fn.length >= 2 ? fn(swings) : fn();
+    if (res) return res;
+  }
+  return {name:"Sideways Block", confidence:0.4};
+}
+
+/* tiny sparkline (close prices) */
+function drawSparkline(closes) {
+  const canvas = document.getElementById("chart");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width = canvas.clientWidth;
+  const H = canvas.height = 140;
+
+  if (!closes || closes.length < 2) { canvas.style.display = "none"; return; }
+  canvas.style.display = "block";
+
+  const data = closes.slice(0, 60).reverse(); // last 60 days, oldest->newest
+  const min = Math.min(...data), max = Math.max(...data);
+  const pad = 8;
+  const xStep = (W - pad*2) / (data.length - 1);
+  const y = v => H - pad - ( (v - min) / (max - min || 1) ) * (H - pad*2);
+
+  ctx.clearRect(0,0,W,H);
+
+  // gridline at latest close
+  ctx.beginPath();
+  ctx.moveTo(pad, y(data[data.length-1]));
+  ctx.lineTo(W-pad, y(data[data.length-1]));
+  ctx.setLineDash([4,4]);
+  ctx.stroke();
+
+  // price line
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(pad, y(data[0]));
+  for (let i=1;i<data.length;i++) {
+    ctx.lineTo(pad + i*xStep, y(data[i]));
+  }
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // last price dot
+  ctx.beginPath();
+  ctx.arc(pad + (data.length-1)*xStep, y(data[data.length-1]), 3, 0, Math.PI*2);
+  ctx.fill();
+}
+
+/* ---------- main analysis ---------- */
 async function predict() {
   const symbol = document.getElementById("symbol").value;
   const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${API_KEY}`;
 
-  document.getElementById('result').innerText = "🔍 Fetching data for " + symbol + "...";
+  const $res = document.getElementById("result");
+  $res.innerText = "🔍 Fetching data for " + symbol + "...";
 
   try {
-    const res = await fetch(url);
-    const data = await res.json();
+    const r = await fetch(url);
+    const data = await r.json();
 
+    if (data["Note"]) {
+      $res.innerHTML = "⚠️ API limit reached. Please try again in ~1 minute.";
+      document.getElementById("chart").style.display = "none";
+      return;
+    }
     const series = data["Time Series (Daily)"];
     if (!series) {
-      document.getElementById('result').innerText = "❌ API limit or invalid symbol.";
+      $res.innerText = "❌ API limit or invalid symbol.";
+      document.getElementById("chart").style.display = "none";
       return;
     }
 
-    const dates = Object.keys(series).sort().reverse();
+    const dates = Object.keys(series).sort().reverse(); // newest -> oldest
     const latest = series[dates[0]];
     const prev = series[dates[1]];
-
-    const open = parseFloat(latest["1. open"]);
-    const high = parseFloat(latest["2. high"]);
-    const low = parseFloat(latest["3. low"]);
+    const open  = parseFloat(latest["1. open"]);
+    const high  = parseFloat(latest["2. high"]);
+    const low   = parseFloat(latest["3. low"]);
     const close = parseFloat(latest["4. close"]);
     const prevClose = parseFloat(prev["4. close"]);
 
+    // arrays (newest -> oldest)
+    const highs = dates.map(d => parseFloat(series[d]["2. high"]));
+    const lows  = dates.map(d => parseFloat(series[d]["3. low"]));
+    const closes= dates.map(d => parseFloat(series[d]["4. close"]));
+
+    // pivots
     const pivot = ((high + low + close) / 3).toFixed(2);
     const r1 = (2 * pivot - low).toFixed(2);
     const s1 = (2 * pivot - high).toFixed(2);
 
-    const highs = [], lows = [];
-    for (let i = 0; i < 14; i++) {
-      highs.push(parseFloat(series[dates[i]]["2. high"]));
-      lows.push(parseFloat(series[dates[i]]["3. low"]));
-    }
-    const highestHigh = Math.max(...highs);
-    const lowestLow = Math.min(...lows);
-    const stochastic = ((close - lowestLow) / (highestHigh - lowestLow) * 100).toFixed(2);
-
+    // stochastic %K (14)
+    const hh = rollingHigh(highs, 14);
+    const ll = rollingLow(lows, 14);
+    const stochastic = (((close - ll) / (hh - ll)) * 100).toFixed(2);
     let momentum = "Neutral Momentum";
     if (stochastic > 80) momentum = "Overbought – Possible Reversal or Breakout";
     else if (stochastic < 20) momentum = "Oversold – Possible Bounce or Breakdown";
 
-    // BLOCK PATTERN: pick 1 strong pattern based on structure index
-    const allPatterns = ["W-Shape", "M-Top", "Inverted Top", "Triple Top", "Triple Bottom", "Rounding Bottom", "Cup & Handle", "Head & Shoulders", "Double Top", "Double Bottom", "Spike Bottom", "Spike Top", "Bull Flag", "Bear Flag", "Ascending Triangle", "Descending Triangle", "Rectangle", "Sideways Block", "Symmetrical Triangle", "Falling Wedge", "Rising Wedge", "Broadening Formation", "Diamond Bottom", "Diamond Top", "Breakaway Gap", "Island Reversal", "Box Range", "Gap Fade", "Expansion Block", "Channel Down", "Channel Up", "Volatility Squeeze"];
-    const patternIndex = symbol.length % allPatterns.length;
-    const strongBlockPattern = allPatterns[patternIndex];
+    // detect pattern (real rules)
+    const pattern = detectBlockPattern(highs, lows, closes);
+    const interpretation = patternInterpretationMap[pattern.name] || "No interpretation available.";
 
-    document.getElementById("result").innerHTML = `
+    // draw sparkline
+    drawSparkline(closes);
+
+    $res.innerHTML = `
       ✅ <b>${symbol}</b><br><br>
       📅 Date: ${dates[0]}<br>
-      📈 Open: ₹${open}<br>
-      💹 Close: ₹${close}<br>
-      🔺 High: ₹${high}<br>
-      🔻 Low: ₹${low}<br>
-      🕘 Prev Close: ₹${prevClose}<br><br>
+      📈 Open: ₹${fmt(open)}<br>
+      💹 Close: ₹${fmt(close)}<br>
+      🔺 High: ₹${fmt(high)}<br>
+      🔻 Low: ₹${fmt(low)}<br>
+      🕘 Prev Close: ₹${fmt(prevClose)}<br><br>
       📌 Pivot: ₹${pivot}<br>
       🛑 Resistance1: ₹${r1} | 🛡️ Support1: ₹${s1}<br><br>
       ⚡ Stochastic %K: ${stochastic}% → <b>${momentum}</b><br><br>
-      🧱 <b>Strongest Block Pattern Detected:</b> <span style='color:#0b5345;'>${strongBlockPattern}</span>
+      🧱 <b>Strongest Block Pattern Detected:</b> <span style='color:#0b5345;'>${pattern.name}</span>
+      <div style="margin-top:6px;opacity:.9"><i>${interpretation}</i> · Confidence: ${(pattern.confidence*100).toFixed(0)}%</div>
     `;
   } catch (e) {
     console.error(e);
-    document.getElementById('result').innerText = "❌ Error fetching data.";
+    document.getElementById("chart").style.display = "none";
+    $res.innerText = "❌ Error fetching data.";
   }
 }
 </script>
-
-
-
 
 <div style="margin-top: 30px; background: #dff0d8; padding: 15px; border-radius: 8px;">
   <h3>📘 What is a Block Pattern?</h3>
@@ -234,5 +423,6 @@ async function predict() {
     </table>
   </div>
 </div>
+
 </body>
 </html>
