@@ -5,7 +5,7 @@ from flask import Flask, jsonify, render_template, request
 
 # ------------ Config ------------
 # Keep your key secret: set ALPHA_VANTAGE_API_KEY in Render (or local) env
-API_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY") or os.environ.get("API_KEY")
+API_KEY = os.environ.get("API_KEY")
 ALPHA_URL = "https://www.alphavantage.co/query"
 CACHE_TTL_SEC = 60  # short cache to ease free-tier rate limits
 
